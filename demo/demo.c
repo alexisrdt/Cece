@@ -1,9 +1,9 @@
-int main(void)
+int some_func()
 {
-	return 57;
+	return 1;
 }
 
-int doit(void)
+int main(void)
 {
-	return 2147483647;
+	return 0;
 }

@@ -1,30 +1,41 @@
 #include "cece/cece.h"
 
-#include <ctype.h>
-#include <stdbool.h>
-#include <stdio.h>
+#include <assert.h>
 #include <stdlib.h>
-#include <string.h>
 
-#include "cece/log.h"
+// Initial buffer size for file reading.
+static constexpr size_t ccInitialSize = 1024;
 
-CcResult ccReadFile(const char* filePath, CcString* pString)
+void ccPrintUsage(FILE* const file)
 {
+	assert(file != nullptr);
+
+	fputs("Usage: cece [options] <file-to-compile>\n", file);
+}
+
+CcResult ccReadFile(const char* const path, CcString* const pString)
+{
+	// Validate arguments.
+	assert(path != nullptr);
+	assert(pString != nullptr);
+
+	pString->string = nullptr;
+
 	CcResult result = CC_SUCCESS;
 
-	FILE* const file = fopen(filePath, "r");
+	// Open file.
+	FILE* const file = fopen(path, "r");
 	if(!file)
 	{
-		CC_LOG("Failed to open file \"%s\".", filePath);
 		result = CC_ERROR_FILE_NOT_FOUND;
-		return result;
+		goto error;
 	}
 
-	size_t capacity = 1024;
+	// Allocate initial buffer.
+	size_t capacity = ccInitialSize;
 	pString->string = malloc(capacity);
 	if(!pString->string)
 	{
-		CC_LOG("Failed to allocate memory.");
 		result = CC_ERROR_OUT_OF_MEMORY;
 		goto error;
 	}
@@ -34,59 +45,48 @@ CcResult ccReadFile(const char* filePath, CcString* pString)
 	while(true)
 	{
 		const size_t read = fread(pString->string + pString->length, sizeof(pString->string[0]), toRead, file);
-		if(SIZE_MAX - pString->length < read)
-		{
-			CC_LOG("Failed to read file \"%s\".", filePath);
-			result = CC_ERROR_UNKNOWN;
-			goto error;
-		}
 		pString->length += read;
 
 		if(read < toRead)
 		{
 			if(!feof(file))
 			{
-				CC_LOG("Failed to read file \"%s\".", filePath);
 				result = CC_ERROR_UNKNOWN;
 				goto error;
 			}
 
-			if(pString->length == SIZE_MAX)
+			if(pString->length >= ccSizeMax)
 			{
-				CC_LOG("Failed to read file \"%s\".", filePath);
-				result = CC_ERROR_UNKNOWN;
+				result = CC_ERROR_OUT_OF_MEMORY;
 				goto error;
 			}
 
 			char* const newString = realloc(pString->string, pString->length + 1);
 			if(!newString)
 			{
-				CC_LOG("Failed to allocate memory.");
 				result = CC_ERROR_OUT_OF_MEMORY;
 				goto error;
 			}
 			pString->string = newString;
 			pString->string[pString->length] = '\0';
 
-			fclose(file);
-
-			return result;
+			result = CC_SUCCESS;
+			goto end;
 		}
 
-		if(capacity == SIZE_MAX)
+		if(capacity >= ccSizeMax)
 		{
-			CC_LOG("Failed to allocate memory.");
-			result = CC_ERROR_UNKNOWN;
+			result = CC_ERROR_OUT_OF_MEMORY;
 			goto error;
 		}
 
-		toRead = capacity;
-		capacity = capacity > SIZE_MAX / 2 ? SIZE_MAX : capacity * 2;
+		const size_t newCapacity = capacity > ccSizeMax / 2 ? ccSizeMax : capacity * 2;
+		toRead = newCapacity - capacity;
+		capacity = newCapacity;
 
 		char* const newString = realloc(pString->string, capacity);
 		if(!newString)
 		{
-			CC_LOG("Failed to allocate memory.");
 			result = CC_ERROR_OUT_OF_MEMORY;
 			goto error;
 		}
@@ -94,7 +94,61 @@ CcResult ccReadFile(const char* filePath, CcString* pString)
 	}
 
 	error:
-	CC_FREE(pString->string)
+	CC_FREE(pString->string);
+	pString->length = 0;
+
+	end:
 	fclose(file);
+
+	return result;
+}
+
+CcResult ccCompile(const CcOptions* const pOptions)
+{
+	CcResult result = CC_SUCCESS;
+
+	// Get source code.
+	CcString source = {};
+	result = ccReadFile(pOptions->input, &source);
+	if(result != CC_SUCCESS)
+	{
+		switch(result)
+		{
+			case CC_ERROR_FILE_NOT_FOUND:
+				fprintf(stderr, "Failed to open file \"%s\".\n", pOptions->input);
+				break;
+
+			case CC_ERROR_OUT_OF_MEMORY:
+				fputs("Out of memory.\n", stderr);
+				break;
+
+			default:
+				fputs("Unknown error occured.\n", stderr);
+				break;
+		}
+
+		goto end;
+	}
+
+	const CcConstString constString = {.string = source.string, .length = source.length};
+	CcTokenList tokenList;
+	result = ccLex(constString, &tokenList);
+	if(result != CC_SUCCESS)
+	{
+		goto end;
+	}
+
+	CcTree tree;
+	result = ccParse(&(const CcConstTokenList){tokenList.tokens, tokenList.count}, &tree);
+	ccFreeTokenList(&tokenList);
+	if(result != CC_SUCCESS)
+	{
+		goto end;
+	}
+
+	ccFreeTree(&tree);
+	
+	end:
+	free(source.string);
 	return result;
 }

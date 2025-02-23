@@ -1,6 +1,7 @@
 #ifndef CECE_RESULT_H
 #define CECE_RESULT_H
 
+// Result type returned by Cece functions.
 typedef enum CcResult
 {
 	CC_SUCCESS,

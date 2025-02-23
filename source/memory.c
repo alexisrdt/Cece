@@ -1,17 +1,24 @@
 #include "cece/memory.h"
 
-size_t ccFind(const void* arrayVoid, size_t count, size_t size, const void* pValueVoid, CcCompare compare)
-{
-	const char* const array = arrayVoid;
+#include <assert.h>
 
-	size_t index;
-	for(index = 0; index < count; ++index)
+#undef ccFind
+
+void* ccFind(const void* const pValueVoid, const void* const arrayVoid, const size_t count, const size_t size, const CcCompare compare)
+{
+	assert(pValueVoid != nullptr);
+	assert(arrayVoid != nullptr);
+	assert(size > 0);
+	assert(count <= ccSizeMax / size);
+	assert(compare != nullptr);
+
+	for(const char* pElement = arrayVoid, * const end = pElement + count * size; pElement < end; pElement += size)
 	{
-		if(compare(array + index * size, pValueVoid) == 0)
+		if(compare(pValueVoid, pElement) == 0)
 		{
-			break;
+			return (void*)pElement;
 		}
 	}
 
-	return index;
+	return nullptr;
 }

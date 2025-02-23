@@ -1,54 +1,68 @@
 #include "cece/arguments.h"
 
-#include <stdbool.h>
+#include <assert.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "cece/log.h"
 #include "cece/memory.h"
 
-CcResult ccParseArguments(unsigned int argumentCount, const char* const* arguments, CcOptions* pOptions)
+CcResult ccParseArguments(const size_t argumentCount, const char* const* const arguments, CcOptions* const pOptions)
 {
+	// Validate arguments.
+	assert(argumentCount > 0);
+	assert(arguments != nullptr);
+	for(size_t argumentIndex = 0; argumentIndex < argumentCount; ++argumentIndex)
+	{
+		assert(arguments[argumentIndex] != nullptr);
+	}
+	assert(pOptions != nullptr);
+
 	CcResult result = CC_SUCCESS;
 
-	pOptions->input = NULL;
-	pOptions->output = NULL;
-	pOptions->version = CC_C17;
-	pOptions->tabWidth = 4;
+	*pOptions = (CcOptions){
+		.version = CC_C23
+	};
 
 	struct
 	{
 		bool version: 1;
-		bool tabWidth: 1;
-	} checks = {0};
+		bool debug: 1;
+	} checks = {};
 
-	for(size_t argumentIndex = 1; argumentIndex < argumentCount; ++argumentIndex)
+	for(size_t argumentIndex = 0; argumentIndex < argumentCount; ++argumentIndex)
 	{
+		if(strcmp(arguments[argumentIndex], "-h") == 0)
+		{
+			pOptions->usage = true;
+
+			goto clear;
+		}
+
 		if(strcmp(arguments[argumentIndex], "-o") == 0)
 		{
 			if(pOptions->output)
 			{
-				CC_LOG("Multiple outputs specified.");
+				fputs("Multiple outputs specified.\n", stderr);
 				result = CC_ERROR_INVALID_ARGUMENT;
-				goto error;
+				goto clear;
 			}
 
 			++argumentIndex;
 			if(argumentIndex == argumentCount)
 			{
-				CC_LOG("Missing argument for -o.");
+				fputs("Missing argument for -o.\n", stderr);
 				result = CC_ERROR_INVALID_ARGUMENT;
-				goto error;
+				goto clear;
 			}
 
-			pOptions->output = malloc(strlen(arguments[argumentIndex]) + 1);
+			pOptions->output = strdup(arguments[argumentIndex]);
 			if(!pOptions->output)
 			{
-				CC_LOG("Failed to allocate memory.");
+				fputs("Failed to allocate memory.\n", stderr);
 				result = CC_ERROR_OUT_OF_MEMORY;
-				goto error;
+				goto clear;
 			}
-			strcpy(pOptions->output, arguments[argumentIndex]);
 
 			continue;
 		}
@@ -57,19 +71,19 @@ CcResult ccParseArguments(unsigned int argumentCount, const char* const* argumen
 		{
 			if(checks.version)
 			{
-				CC_LOG("Multiple versions specified.");
+				fputs("Multiple versions specified.\n", stderr);
 				result = CC_ERROR_INVALID_ARGUMENT;
-				goto error;
+				goto clear;
 			}
 
 			checks.version = true;
 
 			const char* version = arguments[argumentIndex] + 5;
-			if(version[0] != 'c' || version[3] != '\0')
+			if(version[0] != 'c' || version[1] == '\0' || version[2] == '\0' || version[3] != '\0')
 			{
-				CC_LOG("Invalid version.");
+				fputs("Invalid version.\n", stderr);
 				result = CC_ERROR_INVALID_ARGUMENT;
-				goto error;
+				goto clear;
 			}
 
 			++version;
@@ -96,62 +110,58 @@ CcResult ccParseArguments(unsigned int argumentCount, const char* const* argumen
 			}
 			else
 			{
-				CC_LOG("Invalid version.");
+				fputs("Invalid version.\n", stderr);
 				result = CC_ERROR_INVALID_ARGUMENT;
-				goto error;
+				goto clear;
 			}
 
 			continue;
 		}
 
-		if(strncmp(arguments[argumentIndex], "-tab-width=", 11) == 0)
+		if(strcmp(arguments[argumentIndex], "-g") == 0)
 		{
-			if(checks.tabWidth)
+			if(checks.debug)
 			{
-				CC_LOG("Multiple tab widths specified.");
+				fputs("Multiple debug specified.", stderr);
 				result = CC_ERROR_INVALID_ARGUMENT;
-				goto error;
+				goto clear;
 			}
 
-			checks.tabWidth = true;
+			checks.debug = true;
 
-			const char* const tabWidth = arguments[argumentIndex] + 11;
-			char* end;
-			unsigned long long value = strtoull(tabWidth, &end, 10);
-			if(*end != '\0' || value < 1 || value > 64)
-			{
-				CC_LOG("Invalid tab width.");
-				result = CC_ERROR_INVALID_ARGUMENT;
-				goto error;
-			}
-
-			pOptions->tabWidth = value;
+			pOptions->debug = true;
 
 			continue;
+		}
+
+		if(arguments[argumentIndex][0] == '-')
+		{
+			fprintf(stderr, "Unknown option: %s\n", arguments[argumentIndex]);
+			result = CC_ERROR_INVALID_ARGUMENT;
+			goto clear;
 		}
 
 		if(pOptions->input)
 		{
-			CC_LOG("Multiple inputs specified.");
+			fputs("Multiple inputs specified.\n", stderr);
 			result = CC_ERROR_INVALID_ARGUMENT;
-			goto error;
+			goto clear;
 		}
 
-		pOptions->input = malloc(strlen(arguments[argumentIndex]) + 1);
+		pOptions->input = strdup(arguments[argumentIndex]);
 		if(!pOptions->input)
 		{
-			CC_LOG("Failed to allocate memory.");
+			fputs("Failed to allocate memory.\n", stderr);
 			result = CC_ERROR_OUT_OF_MEMORY;
-			goto error;
+			goto clear;
 		}
-		strcpy(pOptions->input, arguments[argumentIndex]);
 	}
 
 	if(!pOptions->input)
 	{
-		CC_LOG("No input specified.");
+		fputs("No input specified.\n", stderr);
 		result = CC_ERROR_INVALID_ARGUMENT;
-		goto error;
+		goto clear;
 	}
 
 	if(!pOptions->output)
@@ -166,9 +176,9 @@ CcResult ccParseArguments(unsigned int argumentCount, const char* const* argumen
 		pOptions->output = malloc(outputLength + 1);
 		if(!pOptions->output)
 		{
-			CC_LOG("Failed to allocate memory.");
+			fputs("Failed to allocate memory.\n", stderr);
 			result = CC_ERROR_OUT_OF_MEMORY;
-			goto error;
+			goto clear;
 		}
 
 		strncpy(pOptions->output, pOptions->input, outputLength);
@@ -177,10 +187,12 @@ CcResult ccParseArguments(unsigned int argumentCount, const char* const* argumen
 		pOptions->output[outputLength] = '\0';
 	}
 
-	return result;
+	goto end;
 
-	error:
-	CC_FREE(pOptions->input)
-	CC_FREE(pOptions->output)
+	clear:
+	CC_FREE(pOptions->input);
+	CC_FREE(pOptions->output);
+
+	end:
 	return result;
 }
